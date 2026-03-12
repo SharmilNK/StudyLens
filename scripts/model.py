@@ -454,6 +454,55 @@ class ClaudeSummarizer(BaseSummarizer):
         return summary
 
 
+# --- Gemini Summarizer (API-based, free tier) ---
+class GeminiSummarizer(BaseSummarizer):
+    """Google Gemini 2.0 Flash via Google GenAI SDK. Free tier: 15 RPM, 1M tokens/day."""
+
+    def __init__(self):
+        from google import genai
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key or api_key == "paste-your-key-here":
+            raise ValueError(
+                "Set GEMINI_API_KEY in .env file. "
+                "Get one free at https://aistudio.google.com/apikey"
+            )
+        self.client = genai.Client(api_key=api_key)
+        self.model_name = "gemini-2.0-flash"
+
+    def summarize(self, text: str, final_pass: bool = True) -> str:
+        word_count = len(text.split())
+        print(f"Sending {word_count} words to {self.model_name} ...")
+
+        if final_pass:
+            prompt = (
+                "You are an expert educational summarizer. "
+                "Summarize the following lecture content into a concise, coherent summary "
+                "suitable for a student reviewing for exams. "
+                "Focus on key concepts, definitions, methods, and relationships. "
+                "Be factual — only include information present in the source material. "
+                "Keep the summary between 100-300 words.\n\n"
+                f"LECTURE CONTENT:\n{text}"
+            )
+        else:
+            prompt = (
+                "You are an expert educational summarizer. "
+                "Create a detailed, structured summary of the following lecture content. "
+                "Cover all major topics and subtopics with key details. "
+                "Use clear section headers. Be factual — only include information "
+                "present in the source material. "
+                "Aim for 300-600 words.\n\n"
+                f"LECTURE CONTENT:\n{text}"
+            )
+
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+        )
+        summary = response.text
+        print(f"  Received {len(summary.split())} words from Gemini.")
+        return summary
+
+
 # --- Helper function to process all files ---
 def process_all_topics(input_dir, output_dir, model, model_tag="default", strategy="final"):
     """
