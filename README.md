@@ -100,6 +100,95 @@ Evaluation auto-discovers all `*_sum_*.txt` files in `data/outputs/`
 and computes ROUGE-L, NLI factual consistency, and BERTScore for each.
 Results are saved to `data/outputs/evaluation_results.csv`.
 
+---
+
+## Experiments Conducted
+
+We conducted three focused experiments to probe our modeling choices, evaluating
+80 summaries across 10 lecture topics from Deep Learning and Machine Learning
+courses using three complementary metrics: **ROUGE-L** (surface overlap with
+reference), **BERTScore** (semantic similarity), and **NLI factual consistency**
+(entailment against source material).
+
+### Experiment 1: Multi-Model Architecture Comparison
+
+We compared summarization quality across a hierarchy of model families to
+determine which architecture class is best suited for lecture summarization.
+
+| Model | Type | Avg ROUGE-L F1 | Avg BERTScore F1 |
+|-------|------|:--------------:|:----------------:|
+| Naive (first-5-sentences) | Extractive baseline | 0.069 | −0.140 |
+| TF-IDF | Classical ML extractive | 0.165 | −0.221 |
+| BART-CNN (concat) | Neural abstractive | 0.051 | −0.283 |
+| LED-arXiv (concat) | Neural abstractive | 0.070 | −0.544 |
+| **Qwen2.5-7B (ratio06)** | **LLM** | **0.233** | **−0.079** |
+
+**Finding:** The instruction-tuned LLM (Qwen2.5-7B) significantly outperformed
+all smaller neural models and classical baselines on both metrics. Smaller
+encoder-decoder models (BART, LED) scored below even the naive baseline on
+BERTScore, likely because aggressive chunking to fit their 1024-token context
+windows fragments the lecture content and loses cross-slide coherence.
+TF-IDF extractive summarization achieved reasonable ROUGE-L by copying verbatim
+sentences but scored poorly on BERTScore due to lack of semantic coherence.
+
+### Experiment 2: Summarization Strategy Ablation (Concat vs. Final)
+
+For each neural model (BART, Long-T5, BART-SAMSum, LED-arXiv), we tested two
+hierarchical summarization strategies:
+
+- **concat**: Chunk the input → summarize each chunk independently →
+  concatenate the chunk summaries as the final output.
+- **final**: Same chunking and per-chunk summarization, but then run a second
+  summarization pass over the concatenated summaries to produce a more coherent
+  final output.
+
+**Finding:** The two-pass `final` strategy was designed to improve coherence
+over raw `concat` by re-summarizing the concatenated chunk outputs. Both
+strategies are implemented in `scripts/model.py` and can be toggled via the
+`--strategy` CLI flag (`concat`, `final`, or `both`). This ablation tests
+whether an additional summarization pass improves output quality or introduces
+information loss through over-compression.
+
+### Experiment 3: Output Ratio Sensitivity Analysis (Qwen2.5-7B)
+
+We swept the `output_ratio` hyperparameter for Qwen2.5-7B across six values to
+understand how target summary length affects quality. The output ratio controls
+the number of generated tokens as a fraction of input tokens.
+
+| Output Ratio | Avg Summary Words | Avg ROUGE-L F1 | Avg BERTScore F1 |
+|:------------:|:-----------------:|:--------------:|:----------------:|
+| 6% | ~606 | **0.233** | **−0.079** |
+| 9% | ~610 | 0.232 | −0.079 |
+| 15% | ~930 | 0.212 | −0.103 |
+| 30% | ~2,306 | 0.157 | −0.126 |
+
+**Finding:** Lower output ratios (6–9%) produced the best summaries. Beyond
+9%, quality degraded on both metrics — longer summaries introduced redundancy
+and filler that hurt precision without meaningfully improving recall. Notably,
+ratios 6% and 9% produced nearly identical results for most topics, suggesting
+that the model naturally converges to a preferred output length regardless of
+the token budget in this range. The 30% ratio produced summaries averaging
+2,300+ words — far too verbose for a useful lecture summary — and scored worst
+on both metrics.
+
+### Evaluation Methodology
+
+All experiments used the same evaluation pipeline (`scripts/eval.py`), which
+auto-discovers output files and computes:
+
+- **ROUGE-L** (precision, recall, F1) — measures n-gram overlap with
+  human-written reference summaries
+- **BERTScore** (precision, recall, F1) — measures semantic similarity using
+  contextual embeddings
+- **NLI Factual Consistency** (entailment ratio, contradiction ratio) —
+  measures whether the summary is factually supported by the source material
+
+Results are saved to `data/outputs/eval/evaluation_results_all.csv` with
+per-topic breakdowns. A composite score (average across all metric F1 scores)
+is computed to rank techniques overall.
+
+---
+
 ### Configure API keys
 
 This project uses the Anthropic API for the Claude-based summarizer.
