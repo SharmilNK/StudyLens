@@ -57,10 +57,11 @@ TOPIC_NAMES = {
     "ml_s5": "Advanced Topics in ML",
 }
 
-# Paths to pre-generated data (best model from experiments = Qwen 6%)
-SUMMARY_DIR = PROJECT_ROOT / "data" / "outputs" / "neural_network" / "qwen7b" / "ratio06"
-REFERENCE_DIR = PROJECT_ROOT / "data" / "reference"
+# Paths to source lecture data
 SOURCE_DIR = PROJECT_ROOT / "data" / "processed"
+
+# In-memory cache for Gemini-generated summaries (avoids re-generating on every request)
+_summary_cache: dict = {}
 
 
 def _get_gemini_client():
@@ -211,25 +212,19 @@ class RAGScoreResponse(BaseModel):
 
 @app.get("/api/topics")
 def list_topics():
-    """Return all available lecture topics with their pre-generated summaries.
+    """Return all available lecture topics.
 
-    Why this endpoint exists: The frontend needs to show a topic picker so users
-    can browse existing lecture summaries or select a topic for the chatbot.
-    We read from the best-performing model output (Qwen 6%) that was identified
-    in our experiments.
+    The frontend uses this to populate the left sidebar topic list.
+    Each topic is available if its source _ori.txt file exists in data/processed/.
     """
     topics = []
     for key, name in TOPIC_NAMES.items():
-        summary_path = SUMMARY_DIR / f"{key}_sum_qwen7b_ratio06.txt"
-        summary = ""
-        if summary_path.exists():
-            summary = summary_path.read_text(encoding="utf-8")
-
+        source_path = SOURCE_DIR / f"{key}_ori.txt"
         topics.append({
             "key": key,
             "name": name,
-            "summary_available": summary_path.exists(),
-            "summary_preview": summary[:300] + "..." if len(summary) > 300 else summary,
+            "available": source_path.exists(),
+            "has_cached_summary": key in _summary_cache,
         })
     return {"topics": topics}
 
@@ -412,28 +407,62 @@ def compute_rag_score(req: RAGScoreRequest):
 # ── GET /api/topic/{topic_key}/summary ────────────────────────────────────────
 
 @app.get("/api/topic/{topic_key}/summary")
-def get_topic_summary(topic_key: str):
-    """Return the pre-generated summary for a specific topic.
+def get_topic_summary(topic_key: str, regenerate: bool = False):
+    """Generate a summary for a topic's lecture material using Gemini.
 
-    Why pre-generated: Our evaluation pipeline already produced summaries from
-    the best model (Qwen 6%).  Serving these avoids an expensive LLM call for
-    topics we've already summarized.  For new/custom text, use /api/summarize.
+    Reads the source _ori.txt (slides + transcript + notes combined), sends it
+    to Gemini Flash, and returns a structured summary.  Results are cached in
+    memory so subsequent requests for the same topic are instant.
+
+    Pass ?regenerate=true to force a fresh Gemini call (e.g. if the user wants
+    a different summary).
     """
     if topic_key not in TOPIC_NAMES:
         raise HTTPException(status_code=404, detail=f"Unknown topic: {topic_key}")
 
-    summary_path = SUMMARY_DIR / f"{topic_key}_sum_qwen7b_ratio06.txt"
-    if not summary_path.exists():
-        raise HTTPException(status_code=404, detail=f"No summary found for {topic_key}")
+    # Return cached summary if available (unless regenerate requested)
+    if not regenerate and topic_key in _summary_cache:
+        return _summary_cache[topic_key]
 
-    summary = summary_path.read_text(encoding="utf-8")
-    return {
+    source_path = SOURCE_DIR / f"{topic_key}_ori.txt"
+    if not source_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Source file not found for {topic_key}. Run the data pipeline first.",
+        )
+
+    source_text = source_path.read_text(encoding="utf-8")
+
+    client = _get_gemini_client()
+    prompt = (
+        "You are an expert educational summarizer for university courses. "
+        "Summarize the following lecture material into a well-structured summary "
+        "suitable for a student reviewing for exams.\n\n"
+        "Your summary should:\n"
+        "- Start with a one-line title of the topic\n"
+        "- List key concepts covered\n"
+        "- Include important definitions, formulas, and technical details\n"
+        "- Preserve the logical flow of the lecture\n"
+        "- Use clear section headers and bullet points\n"
+        "- Be 300-500 words\n\n"
+        "Be factual — only include information present in the source material.\n\n"
+        f"LECTURE MATERIAL:\n{source_text}"
+    )
+
+    response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+    summary = response.text
+
+    result = {
         "topic_key": topic_key,
         "topic_name": TOPIC_NAMES[topic_key],
-        "model": "Qwen2.5-7B (ratio 6%)",
+        "model": "Gemini 2.0 Flash",
         "summary": summary,
         "word_count": len(summary.split()),
     }
+
+    # Cache so we don't re-generate on every page load
+    _summary_cache[topic_key] = result
+    return result
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
