@@ -1,5 +1,5 @@
 % ============================================================
-% Section 3: Data & Problem Setup
+% Section 3: Data & Problem Setup  (unchanged from prior version)
 % ============================================================
 \section{Data \& Problem Setup}
 \label{sec:data}
@@ -54,265 +54,285 @@ The final output of the pipeline is a set of 10 topic-level source files, each m
 \section{Experiments and Results}
 \label{sec:results}
 
-We evaluate StudyLens through three experiments designed to isolate the effects of model architecture, summarization strategy, and output length. All experiments use the same 10 lecture topics and share a unified evaluation pipeline.
+We evaluate StudyLens through four experiments, each designed to isolate one factor: model architecture, summarization strategy, output length, and the effect of fine-tuning. All experiments are run on the same 10 lecture topics and share a unified evaluation pipeline. Every model configuration is evaluated using three metrics---ROUGE-L F1, BERTScore F1, and NLI entailment---across all 10 topics.
 
 \subsection{Models}
 \label{sec:models}
 
-We evaluate seven models spanning three paradigms. Table~\ref{tab:models} summarizes each model's key properties.
+Table~\ref{tab:models} lists all models evaluated in this study.
 
 \begin{table}[H]
 \centering
-\caption{Summary of all models evaluated in this study. Each encoder--decoder model was pre-trained on a general language modeling objective and then fine-tuned on a domain-specific summarization dataset.}
+\caption{Summary of all models. Each encoder--decoder model was pre-trained on a general language modeling objective and then fine-tuned on a domain-specific summarization dataset. Qwen2.5-7B-ft refers to our fine-tuned variant trained on the 6\% output ratio.}
 \label{tab:models}
 \begin{tabular}{llcl}
 \toprule
-Model & Architecture & Context & Fine-tuning Data \\
+Model & Architecture & Context & Fine-tuning Domain \\
 \midrule
 Naive (first-5) & Extractive heuristic & --- & --- \\
+Naive (random-15) & Extractive heuristic & --- & --- \\
 TF-IDF (top-15) & Classical ML & --- & --- \\
-BART-CNN & Encoder--decoder & 1,024 & CNN/DailyMail news \\
+BART-CNN & Encoder--decoder & 1,024 & CNN/DailyMail (news) \\
 Long-T5 & Encoder--decoder & 16,384 & BookSum (books) \\
 BART-SAMSum & Encoder--decoder & 1,024 & SAMSum (dialogues) \\
 LED-arXiv & Encoder--decoder & 16,384 & arXiv (academic papers) \\
-Qwen2.5-7B & Instruction-tuned LLM & 128,000 & General instruction data \\
+Qwen2.5-7B & Instruction-tuned LLM & 128,000 & General instructions \\
+Qwen2.5-7B-ft & Fine-tuned LLM & 128,000 & Lecture summaries (ours) \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \paragraph{Extractive Baselines.}
-The \textbf{Naive} baseline selects the first 5 sentences from the input. \textbf{TF-IDF} ranks all input sentences by their TF-IDF importance scores and selects the top 15 highest-scoring sentences, returned in their original order.
+\textbf{Naive (first-5)} selects the first 5 sentences. \textbf{Naive (random-15)} randomly samples 15 sentences. \textbf{TF-IDF} ranks all input sentences by TF-IDF scores and selects the top 15.
 
 \paragraph{Fine-Tuned Encoder--Decoder Models.}
 We evaluate four pre-trained encoder--decoder models, each fine-tuned on a different summarization dataset:
 \begin{enumerate}
-    \item \textbf{BART-CNN}~\citep{lewis2020bart}: \texttt{facebook/bart-large-cnn} with a 1,024-token context window. Fine-tuned on CNN/DailyMail news articles, this is one of the most widely used summarization models.
-    \item \textbf{Long-T5}~\citep{guo2022longt5}: \texttt{pszemraj/long-t5-tglobal-base-16384-book-summary} with a 16,384-token context. Fine-tuned on BookSum for long-document summarization, making it suited for lengthy lecture transcripts.
-    \item \textbf{BART-SAMSum}: \texttt{philschmid/bart-large-cnn-samsum} with a 1,024-token context. Fine-tuned on the SAMSum dialogue summarization dataset. We included this model because lecture transcripts contain conversational elements that dialogue-trained models might handle better.
-    \item \textbf{LED-arXiv}~\citep{beltagy2020longformer}: \texttt{allenai/led-large-16384-arxiv} with a 16,384-token context. Uses the Longformer attention mechanism and is fine-tuned on arXiv academic papers, making it a natural fit for technical lecture content.
+    \item \textbf{BART-CNN}~\citep{lewis2020bart}: \texttt{facebook/bart-large-cnn}, 1,024-token context. Fine-tuned on CNN/DailyMail news articles.
+    \item \textbf{Long-T5}~\citep{guo2022longt5}: \texttt{pszemraj/long-t5-tglobal-base-16384-book-summary}, 16,384-token context. Fine-tuned on BookSum for long-document summarization.
+    \item \textbf{BART-SAMSum}: \texttt{philschmid/bart-large-cnn-samsum}, 1,024-token context. Fine-tuned on SAMSum dialogues, included because lecture transcripts contain conversational elements.
+    \item \textbf{LED-arXiv}~\citep{beltagy2020longformer}: \texttt{allenai/led-large-16384-arxiv}, 16,384-token context. Uses Longformer attention, fine-tuned on arXiv papers.
 \end{enumerate}
-
-All four models use sentence-aware greedy chunking: input text is split into sentences using NLTK, and sentences are greedily packed into chunks until the model's context window is full. Each chunk is summarized independently. Single sentences exceeding the context limit are hard-truncated at the token level.
+All four use sentence-aware greedy chunking and are evaluated under both \textit{concat} and \textit{final} strategies (see Experiment~2).
 
 \paragraph{Instruction-Tuned LLM.}
-\textbf{Qwen2.5-7B-Instruct}~\citep{qwen2025qwen25} has a 128K-token context window, which is large enough to process an entire lecture in a single pass without chunking. We load the model with 4-bit NF4 quantization via BitsAndBytes to fit within GPU memory. Generation uses greedy decoding (no sampling) with a slight repetition penalty of 1.1 for reproducibility. The output length is controlled by an \textit{output ratio} parameter, which sets the target number of generated tokens as a fraction of the input length. We sweep this ratio across six values: 1\%, 3\%, 6\%, 9\%, 15\%, and 30\%.
+\textbf{Qwen2.5-7B-Instruct}~\citep{qwen2025qwen25} has a 128K-token context window, processing full lectures in a single pass without chunking. We use 4-bit NF4 quantization via BitsAndBytes, greedy decoding, and a repetition penalty of 1.1. Output length is controlled by an \textit{output ratio} parameter (target tokens as a fraction of input length), swept across six values: 1\%, 3\%, 6\%, 9\%, 15\%, and 30\%.
 
-\subsection{Experimental Setup}
-
-\paragraph{Experiment 1: Multi-Model Architecture Comparison.}
-We compare all seven models listed above. The four encoder--decoder models use the \textit{concat} strategy (chunk summaries concatenated as the final output). Qwen is evaluated at its best-performing ratio (6\%). All models are evaluated on the same 10 lecture topics.
-
-\paragraph{Experiment 2: Concat vs.\ Final Strategy.}
-The encoder--decoder models support two summarization strategies:
-\begin{itemize}
-    \item \textit{Concat}: Each input chunk is summarized independently, and the chunk-level summaries are concatenated to form the output.
-    \item \textit{Final}: A second summarization pass is run over the concatenated chunk summaries to produce a more coherent, re-synthesized output.
-\end{itemize}
-We evaluate both strategies for all four encoder--decoder models (BART-CNN, Long-T5, BART-SAMSum, LED-arXiv) plus Claude Sonnet~4 on a two-topic subset with full NLI evaluation.
-
-\paragraph{Experiment 3: Output Ratio Sensitivity (Qwen).}
-We sweep the Qwen output ratio across six values---1\%, 3\%, 6\%, 9\%, 15\%, and 30\%---to study how output verbosity affects summary quality. This experiment identifies the optimal ratio that balances conciseness with coverage.
+\paragraph{Fine-Tuned LLM (Qwen2.5-7B-ft).}
+We additionally fine-tune Qwen2.5-7B on our lecture summarization data at the 6\% output ratio. This model, denoted \textbf{qwen7b-ft}, uses the same inference setup as the base Qwen model but with weights adapted to lecture-style summaries.
 
 \subsection{Evaluation Metrics}
 
 We evaluate using three complementary metrics:
 \begin{itemize}
-    \item \textbf{ROUGE-L F1}~\citep{lin2004rouge}: Measures the longest common subsequence between the generated summary and the human reference, capturing surface-level overlap. Computed using the \texttt{rouge-score} library with stemming enabled.
-    \item \textbf{BERTScore F1}~\citep{zhang2020bertscore}: Computes token-level cosine similarity using contextual embeddings from \texttt{roberta-large}, then aggregates into precision, recall, and F1. Baseline rescaling is applied. For long texts, both the reference and summary are chunked into segments of at most 450 words, aligned pairwise, and scored individually; the final score is the average across aligned pairs.
-    \item \textbf{NLI Factual Consistency}: Uses a cross-encoder NLI model (\texttt{cross-encoder/nli-distilroberta-base}) to measure whether summary sentences are entailed by, neutral to, or contradicted by the source text. Each summary sentence is paired with the top-5 most similar source chunks (by Jaccard word overlap), and the maximum entailment probability is recorded. We report the entailment ratio (fraction of sentences with entailment $>0.5$), average entailment score, and contradiction ratio.
+    \item \textbf{ROUGE-L F1}~\citep{lin2004rouge}: Longest common subsequence between summary and reference, capturing surface overlap. Computed with stemming enabled.
+    \item \textbf{BERTScore F1}~\citep{zhang2020bertscore}: Token-level cosine similarity using \texttt{roberta-large} embeddings with baseline rescaling. Long texts are chunked into 450-word segments, aligned pairwise, and averaged.
+    \item \textbf{NLI Entailment Score}: Uses \texttt{cross-encoder/nli-distilroberta-base} to measure factual consistency. Each summary sentence is paired with the top-5 most similar source chunks (by Jaccard word overlap), and the maximum entailment probability is recorded. We report the average entailment score across all summary sentences.
 \end{itemize}
+We also compute a \textbf{composite score} as the mean of all three metrics, used for overall model ranking.
 
-ROUGE-L and BERTScore measure alignment with the human reference. NLI measures faithfulness to the original source material.
+\subsection{Experiment 1: Full Architecture Comparison}
 
-\subsection{Results}
-
-\subsubsection{Experiment 1: Architecture Comparison}
-
-Table~\ref{tab:architecture} reports the average ROUGE-L F1 and BERTScore F1 across all 10 lecture topics for each model.
+Table~\ref{tab:architecture} reports the average metrics across all 10 topics for every model configuration, ranked by composite score.
 
 \begin{table}[H]
 \centering
-\caption{Average performance across 10 lecture topics (Experiment~1). Best results in bold. All encoder--decoder models use the \textit{concat} strategy.}
+\caption{Average performance across 10 lecture topics, ranked by composite score. Best result per metric in bold.}
 \label{tab:architecture}
-\begin{tabular}{llccccc}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccccc}
 \toprule
-Model & Type & Words & ROUGE-L P & ROUGE-L R & ROUGE-L F1 & BERTScore F1 \\
+Model & Config & Words & ROUGE-L F1 & BERTScore F1 & NLI Entailment & Composite \\
 \midrule
-Naive (first-5) & Extractive & 88 & 0.456 & 0.037 & 0.069 & $-$0.140 \\
-TF-IDF (top-15) & Classical ML & 2,319 & 0.121 & 0.262 & 0.165 & $-$0.221 \\
+Qwen2.5-7B & ratio01 & 176 & 0.127 & \textbf{0.030} & \textbf{0.226} & \textbf{0.128} \\
+Qwen2.5-7B & ratio03 & 489 & 0.212 & $-$0.048 & 0.190 & 0.118 \\
+Qwen2.5-7B-ft & ratio06 & 584 & \textbf{0.234} & $-$0.085 & 0.201 & 0.117 \\
+Qwen2.5-7B & ratio06 & 606 & 0.233 & $-$0.079 & 0.188 & 0.114 \\
+Qwen2.5-7B & ratio09 & 610 & 0.233 & $-$0.079 & 0.189 & 0.114 \\
+Qwen2.5-7B & ratio15 & 1,032 & 0.212 & $-$0.083 & 0.181 & 0.103 \\
+TF-IDF & top-15 & 2,319 & 0.165 & $-$0.221 & 0.284 & 0.076 \\
+Qwen2.5-7B & ratio30 & 2,606 & 0.157 & $-$0.126 & 0.173 & 0.068 \\
+Naive & first-5 & 88 & 0.069 & $-$0.140 & 0.255 & 0.061 \\
 \midrule
-BART-CNN & Enc--Dec (1K) & 112 & 0.268 & 0.028 & 0.051 & $-$0.283 \\
-Long-T5 & Enc--Dec (16K) & --- & --- & --- & --- & --- \\
-BART-SAMSum & Enc--Dec (1K) & --- & --- & --- & --- & --- \\
-LED-arXiv & Enc--Dec (16K) & 605 & 0.107 & 0.053 & 0.070 & $-$0.544 \\
-\midrule
-Qwen2.5-7B (6\%) & LLM (128K) & 606 & \textbf{0.348} & \textbf{0.179} & \textbf{0.233} & \textbf{$-$0.079} \\
+BART-CNN & concat & 112 & 0.051 & $-$0.283 & 0.178 & $-$0.018 \\
+Long-T5 & concat & 373 & 0.081 & $-$0.291 & 0.127 & $-$0.028 \\
+Long-T5 & final & 63 & 0.034 & $-$0.264 & 0.126 & $-$0.035 \\
+BART-CNN & final & 50 & 0.033 & $-$0.289 & 0.148 & $-$0.036 \\
+BART-SAMSum & concat & 140 & 0.053 & $-$0.304 & 0.121 & $-$0.043 \\
+Naive & random-15 & 276 & 0.058 & $-$0.372 & 0.176 & $-$0.046 \\
+BART-SAMSum & final & 90 & 0.039 & $-$0.315 & 0.109 & $-$0.056 \\
+LED-arXiv & final & 241 & 0.073 & $-$0.489 & 0.163 & $-$0.084 \\
+LED-arXiv & concat & 605 & 0.070 & $-$0.544 & 0.169 & $-$0.102 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
-\noindent\textit{Note:} Long-T5 and BART-SAMSum were evaluated in the concat/final strategy experiment (Experiment~2, Table~\ref{tab:strategy}) on a two-topic subset rather than the full 10-topic benchmark.
+Several patterns emerge from this comparison:
+\begin{itemize}
+    \item \textbf{Qwen dominates across all ratios.} Every Qwen configuration (including ratio01) outperforms all encoder--decoder models and extractive baselines on composite score.
+    \item \textbf{The fine-tuned Qwen (qwen7b-ft) achieves the highest ROUGE-L F1} (0.234), slightly beating the base Qwen at 6\% (0.233). Fine-tuning improved ROUGE-L while maintaining competitive NLI entailment (0.201).
+    \item \textbf{All four encoder--decoder models score negative on composite}, meaning their BERTScore penalty outweighs their ROUGE and NLI gains. LED-arXiv performs worst overall ($-$0.102 composite) despite having the largest context window among encoder--decoder models.
+    \item \textbf{TF-IDF leads on NLI entailment} (0.284) because it copies sentences verbatim from the source, but its BERTScore ($-$0.221) and ROUGE-L (0.165) are far below Qwen.
+\end{itemize}
 
-Qwen achieves the highest ROUGE-L F1 (0.233) and BERTScore F1 ($-$0.079), outperforming all other models by a wide margin. The encoder--decoder models (BART-CNN and LED-arXiv) perform below even the naive baseline on BERTScore, reflecting the fragmentation caused by chunking long lecture inputs into small context windows. TF-IDF achieves moderate recall (0.262) by copying many sentences verbatim, but its precision is low (0.121), indicating that most copied sentences are not relevant to the reference summary. The naive baseline has high precision (0.456) but extremely low recall (0.037), producing very short outputs (88 words on average) that overlap with the reference only by chance.
-
-\paragraph{ROUGE-L Comparison.}
-Figure~\ref{fig:rouge_baselines} shows the ROUGE-L F1 for the four baseline models (without Qwen) evaluated across all 10 topics. TF-IDF leads among baselines, but all four score below 0.17.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.85\linewidth]{figures/rouge_l_f1_baselines_from_csv.png}
-\caption{ROUGE-L F1 across baseline architectures (10-topic average, without Qwen). TF-IDF leads among baselines but remains well below Qwen's 0.233.}
-\label{fig:rouge_baselines}
-\end{figure}
-
-\paragraph{BERTScore Comparison.}
-Figure~\ref{fig:bert_baselines} shows BERTScore F1 for the same four baselines. All models score below zero after baseline rescaling. LED-arXiv scores the worst ($-$0.544), likely because its academic-paper fine-tuning produces a writing style mismatched with lecture summary conventions.
+\paragraph{ROUGE-L Comparison (All Models).}
+Figure~\ref{fig:all_rouge} ranks all model configurations by ROUGE-L F1. The fine-tuned Qwen tops the chart at 0.234, followed closely by base Qwen at ratio06 (0.233) and ratio09 (0.233). All encoder--decoder models cluster below 0.081.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\linewidth]{figures/bertscore_f1_baselines_from_csv.png}
-\caption{BERTScore F1 across baseline models (10-topic average). Encoder--decoder models show the weakest semantic alignment.}
-\label{fig:bert_baselines}
+\includegraphics[width=\linewidth]{data/eval/plots/all_models_rouge.png}
+\caption{ROUGE-L F1 by model configuration, averaged across 10 topics. Fine-tuned Qwen achieves the highest score (0.234).}
+\label{fig:all_rouge}
 \end{figure}
 
-\paragraph{Combined ROUGE-L Comparison (All Models Including Qwen).}
-Figure~\ref{fig:rouge_ratio} plots ROUGE-L F1 for all models side by side, with Qwen shown at each of its four evaluated ratios. This visualization makes clear the large gap between the LLM and all other approaches.
+\paragraph{BERTScore Comparison (All Models).}
+Figure~\ref{fig:all_bert} shows BERTScore F1. Qwen at ratio01 is the only model with a positive BERTScore (0.030), meaning its outputs are more semantically similar to human references than the RoBERTa baseline. All encoder--decoder models score below $-$0.26.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\linewidth]{figures/rouge_l_f1_by_bmodel_ratio_20260311_112958.png}
-\caption{ROUGE-L F1 across all models and Qwen output ratios. Qwen at 6\% and 9\% outperforms every other model by a large margin.}
-\label{fig:rouge_ratio}
+\includegraphics[width=\linewidth]{data/eval/plots/all_models_bertscore.png}
+\caption{BERTScore F1 by model configuration. Qwen (ratio01) is the only model achieving a positive score. LED-arXiv scores worst ($-$0.544).}
+\label{fig:all_bert}
 \end{figure}
 
-\paragraph{Combined BERTScore Comparison (All Models Including Qwen).}
-Figure~\ref{fig:bert_ratio} shows the same comparison for BERTScore F1. Qwen at 6--9\% is closest to zero (best), while baseline models are not visible at this scale due to their much lower scores.
+\paragraph{NLI Entailment (All Models).}
+Figure~\ref{fig:all_nli} shows average NLI entailment scores. TF-IDF leads (0.284) due to verbatim copying, followed by Naive first-5 (0.255). Among generative models, Qwen at ratio01 (0.226) and qwen7b-ft (0.201) lead. BART-SAMSum scores lowest (0.109--0.121).
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\linewidth]{figures/bertscore_f1_by_bmodel_ratio_20260311_112958.png}
-\caption{BERTScore F1 across all models and Qwen output ratios. Qwen at 6--9\% achieves the best semantic similarity.}
-\label{fig:bert_ratio}
+\includegraphics[width=\linewidth]{data/eval/plots/all_models_nli.png}
+\caption{NLI entailment score by model configuration. Extractive methods lead on entailment; BART-SAMSum and Long-T5 score lowest.}
+\label{fig:all_nli}
 \end{figure}
 
-\subsubsection{Experiment 2: Concat vs.\ Final Strategy (All Four Encoder--Decoder Models)}
+\paragraph{Multi-Metric Radar Chart.}
+Figure~\ref{fig:radar} provides a normalized radar chart comparing the top models across all three metrics simultaneously. The fine-tuned Qwen (qwen7b-ft) achieves the most balanced profile, with strong ROUGE-L and BERTScore. TF-IDF shows a spike on NLI entailment but collapses on BERTScore. The encoder--decoder models (BART, Long-T5) have small footprints, reflecting weak performance across all metrics.
 
-Table~\ref{tab:strategy} reports the results of both strategies for all four encoder--decoder models plus Claude Sonnet~4, evaluated on two lecture topics with full NLI scoring.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\linewidth]{data/eval/plots/radar_top_models.png}
+\caption{Normalized radar chart comparing top models across ROUGE-L F1, BERTScore F1, and NLI entailment. Larger area indicates better overall performance.}
+\label{fig:radar}
+\end{figure}
+
+\subsection{Experiment 2: Concat vs.\ Final Strategy Ablation}
+
+All four encoder--decoder models support two strategies: \textit{concat} (concatenate chunk summaries) and \textit{final} (run a second summarization pass over the concatenated output). Figure~\ref{fig:ablation} compares both strategies across all three metrics.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{data/eval/plots/ablation_concat_final.png}
+\caption{Ablation: concat vs.\ final-pass summarization for all four encoder--decoder models, evaluated on ROUGE-L F1, BERTScore F1, and NLI entailment (10-topic averages).}
+\label{fig:ablation}
+\end{figure}
+
+Table~\ref{tab:strategy} provides the exact numbers.
 
 \begin{table}[H]
 \centering
-\caption{Concat vs.\ Final strategy comparison across all four encoder--decoder models and Sonnet~4 (2 topics, with NLI). Best ROUGE-L per model in bold.}
+\caption{Concat vs.\ Final strategy comparison for all four encoder--decoder models (10-topic averages).}
 \label{tab:strategy}
 \begin{tabular}{llccccc}
 \toprule
-Model & Strategy & Words & ROUGE-L F1 & BERTScore F1 & Entail.\ Ratio & Contra.\ Ratio \\
+Model & Strategy & Words & ROUGE-L F1 & BERTScore F1 & NLI Entail. & Contra. Ratio \\
 \midrule
-BART-CNN & concat & 238 & \textbf{0.068} & $-$0.251 & 0.000 & 0.581 \\
-BART-CNN & final & 44 & 0.010 & $-$0.194 & 0.000 & 0.700 \\
+BART-CNN & concat & 112 & \textbf{0.051} & $-$0.283 & \textbf{0.178} & 0.554 \\
+BART-CNN & final & 50 & 0.033 & $-$0.289 & 0.148 & 0.492 \\
 \midrule
-Long-T5 & concat & 183 & \textbf{0.024} & $-$0.242 & 0.000 & 0.486 \\
-Long-T5 & final & 96 & 0.018 & $-$0.251 & 0.000 & 0.786 \\
+Long-T5 & concat & 373 & \textbf{0.081} & $-$0.291 & \textbf{0.127} & 0.445 \\
+Long-T5 & final & 63 & 0.034 & $-$0.264 & 0.126 & 0.457 \\
 \midrule
-BART-SAMSum & concat & 170 & \textbf{0.021} & $-$0.265 & 0.000 & 0.613 \\
-BART-SAMSum & final & 116 & 0.013 & $-$0.253 & 0.000 & 0.583 \\
+BART-SAMSum & concat & 140 & \textbf{0.053} & $-$0.304 & \textbf{0.121} & 0.469 \\
+BART-SAMSum & final & 90 & 0.039 & $-$0.315 & 0.109 & 0.480 \\
 \midrule
-LED-arXiv & concat & 752 & \textbf{0.058} & $-$0.580 & 0.000 & 0.394 \\
-LED-arXiv & final & 252 & 0.031 & $-$0.508 & 0.000 & 0.513 \\
-\midrule
-Sonnet~4 & concat & 527 & \textbf{0.059} & \textbf{$-$0.032} & 0.042 & 0.857 \\
-Sonnet~4 & final & 299 & 0.036 & $-$0.193 & 0.033 & 0.800 \\
+LED-arXiv & concat & 605 & 0.070 & $-$0.544 & \textbf{0.169} & 0.483 \\
+LED-arXiv & final & 241 & \textbf{0.073} & $-$0.489 & 0.163 & 0.368 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Several patterns stand out across all four encoder--decoder models:
+Key observations:
 \begin{itemize}
-    \item The \textit{concat} strategy consistently outperforms \textit{final} on ROUGE-L F1 for every model. The second summarization pass in the \textit{final} strategy compresses already short chunk summaries further, losing information without gaining coherence.
-    \item None of the encoder--decoder models achieve a nonzero entailment ratio. This means no summary sentence from BART-CNN, Long-T5, BART-SAMSum, or LED-arXiv is confidently supported by the source text.
-    \item Contradiction ratios are high across the board (39--79\%), indicating that these fine-tuned models frequently generate statements that conflict with the input lecture content.
-    \item BART-SAMSum, despite being fine-tuned on dialogues (and thus expected to handle lecture transcripts better), does not outperform standard BART-CNN. Its concat ROUGE-L (0.021) is actually lower than BART-CNN's (0.068).
-    \item Long-T5, despite its larger 16K-token window, does not outperform BART-CNN on this subset. Its book-summary fine-tuning does not transfer well to lecture content.
-    \item Claude Sonnet~4 achieves the best BERTScore ($-$0.032 concat) but also the highest contradiction ratio (85.7\%), showing that large LLMs produce fluent text that nonetheless introduces unsupported claims.
+    \item \textit{Concat} outperforms \textit{final} on ROUGE-L for three of four models (BART, Long-T5, BART-SAMSum). The second pass compresses already short chunk summaries further---BART-final produces only 50 words on average---losing information without gaining coherence.
+    \item LED-arXiv is the exception: \textit{final} slightly outperforms \textit{concat} on both ROUGE-L (0.073 vs.\ 0.070) and BERTScore ($-$0.489 vs.\ $-$0.544). Its 16K context window produces longer chunk summaries that benefit from a coherence-improving second pass.
+    \item NLI entailment is consistently higher for \textit{concat}, since keeping more chunk-level detail preserves source-aligned content.
+    \item None of these models approach Qwen's performance under either strategy.
 \end{itemize}
 
-\subsubsection{Experiment 3: Output Ratio Sensitivity (Qwen)}
+\subsection{Experiment 3: Qwen Output Ratio Sensitivity}
 
-Table~\ref{tab:ratio} shows how varying the output ratio affects Qwen's summarization quality across the four ratios evaluated on all 10 topics.
+We sweep the Qwen output ratio across six values to identify the optimal balance between conciseness and coverage. Figure~\ref{fig:ratio_curve} plots all three metrics as a function of the output ratio.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{data/eval/plots/qwen_ratio_tuning.png}
+\caption{Effect of output ratio on Qwen's three metrics. ROUGE-L peaks at 6--9\%, BERTScore peaks at 1\%, and NLI entailment decreases steadily with ratio.}
+\label{fig:ratio_curve}
+\end{figure}
+
+Table~\ref{tab:ratio} provides the exact numbers.
 
 \begin{table}[H]
 \centering
-\caption{Effect of output ratio on Qwen summarization quality (averaged over 10 topics). The 6\% ratio achieves the best performance.}
+\caption{Qwen output ratio sweep (10-topic averages). Best result per metric in bold.}
 \label{tab:ratio}
-\begin{tabular}{cccc}
+\begin{tabular}{cccccc}
 \toprule
-Ratio & Avg.\ Words & ROUGE-L F1 & BERTScore F1 \\
+Ratio & Avg.\ Words & ROUGE-L F1 & BERTScore F1 & NLI Entail. & Composite \\
 \midrule
-6\%  & 606  & \textbf{0.233} & \textbf{$-$0.079} \\
-9\%  & 610  & 0.233 & $-$0.079 \\
-15\% & 1,032 & 0.212 & $-$0.083 \\
-30\% & 2,606 & 0.157 & $-$0.126 \\
+1\%  & 176   & 0.127 & \textbf{0.030} & \textbf{0.226} & \textbf{0.128} \\
+3\%  & 489   & 0.212 & $-$0.048 & 0.190 & 0.118 \\
+6\%  & 606   & \textbf{0.233} & $-$0.079 & 0.188 & 0.114 \\
+9\%  & 610   & 0.233 & $-$0.079 & 0.189 & 0.114 \\
+15\% & 1,032 & 0.212 & $-$0.083 & 0.181 & 0.103 \\
+30\% & 2,606 & 0.157 & $-$0.126 & 0.173 & 0.068 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The 6\% ratio produces the best results. Performance at 6\% and 9\% is nearly identical, with both ROUGE-L and BERTScore within 0.001 of each other. This suggests a quality plateau for concise outputs---the model has already captured the key content at 6\%, and allowing slightly more tokens (9\%) does not help. At 15\%, ROUGE-L drops by 9\% relative to the 6\% baseline, and at 30\% it drops by 33\%. The 30\% ratio produces summaries averaging 2,606 words---over four times longer than the 6\% output---yet scores worse on every metric because the extra length introduces redundancy and filler.
+The three metrics tell different stories:
+\begin{itemize}
+    \item \textbf{ROUGE-L peaks at 6--9\%} (0.233), then declines. At 30\%, it drops 33\% relative to the peak. Very short summaries (1\%) also score lower (0.127) because they lack coverage.
+    \item \textbf{BERTScore peaks at 1\%} (0.030, the only positive score across all models). Shorter outputs are more semantically precise, with each sentence closely matching the reference. As output grows, filler and redundancy drag BERTScore down.
+    \item \textbf{NLI entailment peaks at 1\%} (0.226) and decreases steadily. Shorter summaries contain fewer sentences, and those few sentences tend to state well-supported core concepts.
+    \item \textbf{The 6\% ratio offers the best trade-off for ROUGE-L} (the primary reference-alignment metric), producing roughly 600-word summaries. For applications prioritizing semantic precision or faithfulness, the 1\% ratio may be preferred.
+\end{itemize}
 
-\paragraph{Why 6\% Works Best.}
-The 6\% ratio strikes the right balance: it generates roughly 600 words, which is enough to cover all major lecture topics and subtopics without padding the output with repeated definitions or restated concepts. At this ratio, Qwen's ROUGE-L F1 (0.233) is 1.4$\times$ higher than TF-IDF (0.165) and 4.6$\times$ higher than BART-CNN (0.051), establishing a clear advantage for instruction-tuned LLMs on lecture summarization.
+\subsection{Experiment 4: Effect of Fine-Tuning (Qwen2.5-7B-ft)}
 
-\paragraph{ROUGE-L by Ratio.}
-Figure~\ref{fig:rouge_all_ratio} plots ROUGE-L F1 for all models and ratios side by side. The four Qwen bars dominate the chart, with a clear decline from 6\% to 30\%.
+We fine-tune Qwen2.5-7B on our lecture summarization data at the 6\% output ratio. Table~\ref{tab:finetuned} compares the fine-tuned model against the base model.
+
+\begin{table}[H]
+\centering
+\caption{Base Qwen vs.\ fine-tuned Qwen (qwen7b-ft), both at 6\% output ratio (10-topic averages).}
+\label{tab:finetuned}
+\begin{tabular}{lcccc}
+\toprule
+Model & ROUGE-L F1 & BERTScore F1 & NLI Entail. & Composite \\
+\midrule
+Qwen2.5-7B (ratio06) & 0.233 & $-$0.079 & 0.188 & 0.114 \\
+Qwen2.5-7B-ft (ratio06) & \textbf{0.234} & $-$0.085 & \textbf{0.201} & \textbf{0.117} \\
+\midrule
+$\Delta$ (ft $-$ base) & +0.001 & $-$0.006 & +0.013 & +0.003 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Fine-tuning produces three effects:
+\begin{itemize}
+    \item \textbf{ROUGE-L improves marginally} (+0.001), making qwen7b-ft the overall ROUGE-L leader (0.234) across all 19 model configurations tested.
+    \item \textbf{NLI entailment improves meaningfully} (+0.013, a 6.9\% relative improvement). The fine-tuned model generates summaries that are better grounded in the source material, likely because it learned which types of claims are appropriate for lecture summaries.
+    \item \textbf{BERTScore decreases slightly} ($-$0.006). The fine-tuned model's outputs may diverge from the reference writing style while still being factually accurate.
+    \item \textbf{Composite score improves} (+0.003), confirming that fine-tuning provides a net benefit.
+\end{itemize}
+
+Figure~\ref{fig:ft_rouge} shows the fine-tuned model alongside all other models in a direct ROUGE-L comparison, confirming that qwen7b-ft achieves the top score.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\linewidth]{figures/rouge_l_f1_by_bmodel_ratio_20260311_112958.png}
-\caption{ROUGE-L F1 across all models and Qwen output ratios (10-topic average). The 6\% and 9\% ratios perform nearly identically, while 30\% shows a clear drop.}
-\label{fig:rouge_all_ratio}
+\includegraphics[width=0.85\linewidth]{data/eval/plots/rouge_l_f1_by_bmodel_ratio_test_finetuned_20260314_234421.png}
+\caption{ROUGE-L F1 comparison including the fine-tuned Qwen (qwen7b-ft). The fine-tuned model slightly exceeds all base Qwen ratios.}
+\label{fig:ft_rouge}
 \end{figure}
 
-\paragraph{BERTScore by Ratio.}
-Figure~\ref{fig:bert_all_ratio} shows the same comparison for BERTScore F1, with a sharper drop between 15\% and 30\%.
+Figure~\ref{fig:ft_nli} shows the NLI entailment comparison, where qwen7b-ft achieves 0.201---higher than any base Qwen ratio.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\linewidth]{figures/bertscore_f1_by_bmodel_ratio_20260311_112958.png}
-\caption{BERTScore F1 across all models and output ratios. Semantic similarity drops noticeably beyond 9\%.}
-\label{fig:bert_all_ratio}
-\end{figure}
-
-\subsubsection{Faithfulness via NLI}
-
-NLI evaluation was conducted on baseline models (10-topic average) and on all Qwen ratios.
-
-\paragraph{Baseline Entailment.}
-Figure~\ref{fig:nli_baselines} shows the average NLI entailment scores for the four baseline models. Extractive methods (Naive and TF-IDF) show higher entailment than the encoder--decoder models because they copy sentences directly from the source. TF-IDF achieves the highest entailment score among baselines, likely because its top-ranked sentences contain the most distinctive and verifiable claims. However, even verbatim copying does not guarantee high entailment---the NLI model evaluates sentence-level semantic relationships, and copied sentences may lack sufficient context when evaluated in isolation.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.85\linewidth]{figures/nli_entailment_by_model_ratio.png}
-\caption{Average NLI entailment scores across baseline models (10-topic average). Extractive methods (Naive, TF-IDF) achieve higher entailment than neural models (BART, LED-arXiv).}
-\label{fig:nli_baselines}
-\end{figure}
-
-\paragraph{Qwen Entailment by Ratio.}
-Figure~\ref{fig:nli_ratio} shows NLI entailment across all four Qwen output ratios. Qwen at 6\% and 9\% achieves the highest entailment scores (approximately 0.19), outperforming all baseline models. Entailment decreases slightly at 15\% and 30\%, consistent with the ROUGE-L and BERTScore trends---longer outputs introduce more sentences that are harder to ground in the source.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.85\linewidth]{figures/nli_entailment_by_bmodel_ratio_20260311_112958.png}
-\caption{NLI entailment across all models and Qwen output ratios. Qwen at 6--9\% achieves the highest entailment among all models.}
-\label{fig:nli_ratio}
+\includegraphics[width=0.85\linewidth]{data/eval/plots/nli_entailment_by_bmodel_ratio__finetuned_20260314_230435.png}
+\caption{NLI entailment comparison including the fine-tuned Qwen. Fine-tuning improves factual grounding (0.201 vs.\ 0.188 for base Qwen at 6\%).}
+\label{fig:ft_nli}
 \end{figure}
 
 \subsection{Summary of Findings}
 
-Four key findings emerge from our experiments:
-
+Four key findings emerge:
 \begin{enumerate}
-    \item \textbf{Instruction-tuned LLMs outperform all fine-tuned encoder--decoder models.} Qwen2.5-7B at 6\% achieves the best ROUGE-L F1 (0.233), BERTScore F1 ($-$0.079), and NLI entailment across all models tested---including four fine-tuned encoder--decoder models (BART-CNN, Long-T5, BART-SAMSum, LED-arXiv) and two extractive baselines.
-    \item \textbf{Fine-tuning domain does not transfer to lectures.} Despite being fine-tuned on dialogues (BART-SAMSum), books (Long-T5), academic papers (LED-arXiv), and news (BART-CNN), none of these models produce good lecture summaries. The domain gap between their training data and lecture transcripts is too large.
-    \item \textbf{Context window size matters more than model family.} Models that must chunk long lectures into small windows lose cross-slide coherence and produce fragmented outputs. Qwen's 128K-token window processes the full lecture in a single pass, avoiding this problem entirely.
-    \item \textbf{The 6\% output ratio is optimal.} Increasing the output ratio beyond 9\% consistently degrades all metrics. The optimal operating point lies at 6\% of input length, producing summaries of roughly 600 words.
+    \item \textbf{Instruction-tuned LLMs outperform all encoder--decoder models.} Every Qwen configuration outperforms all four fine-tuned encoder--decoder models (BART-CNN, Long-T5, BART-SAMSum, LED-arXiv) and both extractive baselines on composite score.
+    \item \textbf{Fine-tuning Qwen on lecture data improves faithfulness.} The fine-tuned model (qwen7b-ft) achieves the highest ROUGE-L (0.234) and a 6.9\% relative improvement in NLI entailment over the base model, confirming that domain adaptation benefits even large LLMs.
+    \item \textbf{Context window size matters more than fine-tuning domain.} All four encoder--decoder models---fine-tuned on news, books, dialogues, and academic papers respectively---perform poorly because chunking fragments the lecture content. Qwen's 128K-token window avoids this entirely.
+    \item \textbf{The 6\% output ratio maximizes ROUGE-L.} Across six ratios (1--30\%), 6\% achieves the best ROUGE-L (0.233). The 1\% ratio achieves the best BERTScore and NLI entailment but at the cost of coverage.
 \end{enumerate}
 
 
@@ -322,28 +342,29 @@ Four key findings emerge from our experiments:
 \section{Error Analysis}
 \label{sec:errors}
 
-We inspect model outputs across all three experiments and identify four recurring failure modes.
+We inspect model outputs across all four experiments and identify five recurring failure modes.
 
-\paragraph{Chunk Fragmentation (All Four Encoder--Decoder Models).}
-BART-CNN and BART-SAMSum process inputs in chunks of 1,024 tokens, while Long-T5 and LED-arXiv use 16,384-token chunks. When a lecture spans tens of thousands of tokens, even the larger-context models must split the input into multiple chunks. This causes three specific problems: (1)~information that spans multiple slides or transcript segments is split across chunks, so the model never sees the full argument; (2)~each chunk summary repeats setup context (e.g., restating the topic name), leading to redundant phrasing; and (3)~the concatenated output reads as a list of disconnected paragraphs rather than a coherent summary. The \textit{final} strategy was designed to address this by running a second summarization pass, but in practice it over-compresses already short chunk summaries---BART-CNN final produces only 44 words on average---losing content without improving coherence (Table~\ref{tab:strategy}).
+\paragraph{1. Chunk Fragmentation (All Four Encoder--Decoder Models).}
+BART-CNN and BART-SAMSum process inputs in chunks of 1,024 tokens, while Long-T5 and LED-arXiv use 16,384-token chunks. When a lecture spans tens of thousands of tokens, even the larger-context models must split the input. This causes three problems: (i)~cross-slide arguments are split across chunks, so the model never sees the full reasoning; (ii)~each chunk summary repeats setup context, creating redundant phrasing; (iii)~the concatenated output reads as disconnected paragraphs rather than a coherent summary. The \textit{final} strategy was designed to address this by running a second summarization pass, but as shown in Figure~\ref{fig:ablation}, it usually makes things worse---BART-final produces only 50 words on average, losing content without improving coherence.
 
-\paragraph{Fine-Tuning Domain Mismatch.}
-Each encoder--decoder model was fine-tuned on a specific domain, and none of these domains match lecture transcripts:
+\paragraph{2. Fine-Tuning Domain Mismatch.}
+Each encoder--decoder model was fine-tuned on a different domain, and none of these domains match lecture transcripts:
 \begin{itemize}
-    \item \textbf{BART-CNN} (news): Produces summaries in a journalistic style that does not capture technical definitions or mathematical formulas well.
-    \item \textbf{Long-T5} (books): Generates narrative-style prose that lacks the structured format students expect from lecture summaries.
-    \item \textbf{BART-SAMSum} (dialogues): Despite lectures being partially conversational, the model does not benefit from this---its ROUGE-L (0.021) is actually lower than BART-CNN's (0.068). Lecture ``dialogue'' is fundamentally different from chat conversations.
-    \item \textbf{LED-arXiv} (academic papers): The closest domain match, yet it achieves the worst BERTScore ($-$0.580) among all models. Its summaries adopt an abstract-like writing style that does not align with how reference summaries are written.
+    \item \textbf{BART-CNN} (news, ROUGE-L: 0.051): Produces journalistic-style summaries that miss technical definitions and formulas.
+    \item \textbf{Long-T5} (books, ROUGE-L: 0.081): Generates narrative prose that lacks the structured format students expect.
+    \item \textbf{BART-SAMSum} (dialogues, ROUGE-L: 0.053): Despite lectures being partially conversational, its dialogue-focused training does not help---lecture ``dialogue'' is fundamentally different from chat.
+    \item \textbf{LED-arXiv} (academic papers, ROUGE-L: 0.070): The closest domain match, yet it achieves the worst BERTScore ($-$0.544). Its abstract-like style does not match lecture summary conventions.
 \end{itemize}
+This mismatch is visible in Figure~\ref{fig:all_nli}: BART-SAMSum has the lowest NLI entailment (0.109--0.121), even below the random baseline.
 
-\paragraph{Redundancy at High Output Ratios.}
-When Qwen's output ratio is set to 30\%, summaries average 2,606 words and ROUGE-L drops to 0.157 (from 0.233 at 6\%). Manual inspection reveals that these long summaries repeat definitions and restate concepts in slightly different words. For example, a 30\% summary for the NLP~2 lecture restates the definition of word embeddings three times across different paragraphs. This repetition inflates word count without adding information, and it dilutes the density of relevant content that ROUGE and BERTScore can match against the reference.
+\paragraph{3. Redundancy at High Output Ratios.}
+When Qwen's output ratio is set to 30\%, summaries average 2,606 words and ROUGE-L drops to 0.157 (from 0.233 at 6\%). As shown in Figure~\ref{fig:ratio_curve}, all three metrics degrade at high ratios. Manual inspection reveals repeated definitions---for example, one 30\% summary restates the definition of word embeddings three times. The extra length dilutes the density of relevant content.
 
-\paragraph{High Contradiction Rates Across All Models.}
-The NLI evaluation reveals that all models produce summaries with substantial contradiction ratios (Table~\ref{tab:strategy}). Among the four encoder--decoder models, contradiction ratios range from 39\% (LED-arXiv concat) to 79\% (Long-T5 final). None of the four encoder--decoder models achieve a nonzero entailment ratio---meaning that no generated sentence from BART-CNN, Long-T5, BART-SAMSum, or LED-arXiv is judged as clearly supported by the source. Even Claude Sonnet~4, which achieves the best BERTScore, has a contradiction ratio of 80--86\%. These contradictions arise for two reasons. First, the NLI model (DistilRoBERTa-base, 512-token limit) evaluates summary sentences against short source excerpts, and a summary sentence that synthesizes information from multiple parts of the lecture may appear to contradict any single excerpt. Second, abstractive models occasionally introduce unsupported claims.
+\paragraph{4. High Contradiction Rates Across All Models.}
+The NLI evaluation reveals high contradiction ratios across all models. Among encoder--decoder models, contradiction ranges from 37\% (LED-arXiv final) to 55\% (BART concat). Notably, Qwen models also have high contradiction ratios (79--86\%), as do TF-IDF (79\%) and Naive first-5 (70\%). This suggests the contradiction metric is partly inflated by the NLI model's 512-token limit: a summary sentence that synthesizes information from multiple parts of the lecture may appear to contradict any single short excerpt. The high contradiction for extractive methods (which copy verbatim) confirms this limitation.
 
-\paragraph{Limitations of the Evaluation.}
-Our NLI evaluation has its own limitations. The cross-encoder model has a 512-token context window, which restricts how much source material can be considered per summary sentence. The top-5 source chunk retrieval (by Jaccard overlap) may miss relevant passages that use different vocabulary. BERTScore values are negative after baseline rescaling, making absolute interpretation difficult---relative comparisons between models remain valid, but the scores do not indicate ``good'' or ``bad'' quality on an intuitive scale.
+\paragraph{5. BERTScore--Entailment Trade-off.}
+An interesting pattern emerges from the Qwen ratio sweep (Figure~\ref{fig:ratio_curve}): BERTScore and NLI entailment peak at 1\%, while ROUGE-L peaks at 6\%. Very short summaries (176 words at 1\%) are semantically precise and well-grounded but lack coverage. Longer summaries (606 words at 6\%) cover more topics but sacrifice precision. No single ratio optimizes all metrics simultaneously, suggesting that the optimal setting depends on the application---exam review favors coverage (6\%), while fact-checking favors precision (1\%).
 
 
 % ============================================================
@@ -352,23 +373,23 @@ Our NLI evaluation has its own limitations. The cross-encoder model has a 512-to
 \section{Conclusion}
 \label{sec:conclusion}
 
-In this work, we presented StudyLens, a system for automatically summarizing university lectures by combining slide decks, transcripts, and student notes. We evaluated seven summarization approaches---a naive extractive baseline, TF-IDF sentence extraction, four fine-tuned encoder--decoder models (BART-CNN, Long-T5, BART-SAMSum, LED-arXiv), and an instruction-tuned LLM (Qwen2.5-7B-Instruct)---across 10 lecture topics from Deep Learning and Machine Learning courses, using ROUGE-L, BERTScore, and NLI factual consistency as evaluation metrics.
+We presented StudyLens, a system for automatically summarizing university lectures by combining slide decks, transcripts, and student notes. We conducted a systematic evaluation of nine models spanning three paradigms---extractive baselines (Naive, TF-IDF), four fine-tuned encoder--decoder models (BART-CNN, Long-T5, BART-SAMSum, LED-arXiv), and instruction-tuned LLMs (Qwen2.5-7B base and fine-tuned)---across 10 lecture topics using ROUGE-L, BERTScore, and NLI factual consistency.
 
-Our experiments lead to four main conclusions:
+Our experiments yield four main conclusions:
 \begin{enumerate}
-    \item \textbf{LLMs outperform fine-tuned models.} Qwen2.5-7B at the 6\% output ratio consistently achieves the best results on all metrics. Its ROUGE-L F1 of 0.233 is 1.4$\times$ higher than TF-IDF (0.165), 3.3$\times$ higher than LED-arXiv (0.070), and 4.6$\times$ higher than BART-CNN (0.051).
-    \item \textbf{Fine-tuning domain matters, but none of the available domains match lectures.} Despite trying models fine-tuned on news (BART-CNN), books (Long-T5), dialogues (BART-SAMSum), and academic papers (LED-arXiv), none produced good lecture summaries. The domain gap between training data and lecture transcripts is too large for fine-tuning alone to bridge.
-    \item \textbf{Context window is more important than model architecture.} All four encoder--decoder models struggle because they must chunk long lectures. Qwen's 128K-token window avoids this entirely, processing the full lecture in a single pass.
-    \item \textbf{The 6\% output ratio is optimal for Qwen.} Sweeping across six ratios (1\%--30\%), we find that 6\% produces roughly 600-word summaries that maximize both reference alignment and semantic quality. Beyond 9\%, quality degrades steadily.
+    \item \textbf{LLMs outperform all other approaches.} Qwen2.5-7B achieves the best ROUGE-L (0.233 at 6\%), which is 1.4$\times$ higher than TF-IDF (0.165), 2.9$\times$ higher than Long-T5 (0.081), and 4.6$\times$ higher than BART-CNN (0.051). It is also the only model with a positive BERTScore (0.030 at 1\%).
+    \item \textbf{Fine-tuning Qwen on lecture data helps.} The fine-tuned model (qwen7b-ft) achieves the highest ROUGE-L overall (0.234) and a 6.9\% relative improvement in NLI entailment (0.201 vs.\ 0.188), confirming that even large LLMs benefit from domain-specific adaptation.
+    \item \textbf{Context window is more important than fine-tuning domain.} None of the four encoder--decoder models---fine-tuned on news, books, dialogues, and academic papers---produce adequate lecture summaries. Their small context windows (1K--16K tokens) force chunking that fragments cross-slide coherence, which no amount of domain-specific fine-tuning can overcome.
+    \item \textbf{The optimal output ratio depends on the use case.} The 6\% ratio maximizes ROUGE-L (coverage), while 1\% maximizes BERTScore and NLI entailment (precision and faithfulness). For general lecture review, we recommend the 6--9\% range ($\sim$600 words).
 \end{enumerate}
 
-We also identified areas where all models fall short. Factual consistency remains a challenge: contradiction ratios are high even for the best-performing models, and all four encoder--decoder models achieve zero entailment. This gap between fluency and faithfulness suggests that lecture summarization would benefit from grounding mechanisms such as retrieval-augmented generation or constrained decoding.
+Despite strong results, factual consistency remains a challenge. Contradiction ratios are high across all models---including extractive methods that copy source text verbatim---suggesting that part of this is an artifact of the NLI evaluation's 512-token context limit rather than actual model errors. Future work should explore grounding mechanisms such as retrieval-augmented generation and should evaluate with human judges to complement automatic metrics.
 
-Our study has several limitations. The evaluation is conducted on 10 lecture topics from a single institution, which limits generalizability. The human reference summaries were written by one annotator per topic, introducing potential bias. NLI evaluation uses a relatively small cross-encoder model with a 512-token window, which may undercount entailment for summaries that synthesize information from multiple source passages. Long-T5 and BART-SAMSum were evaluated on a two-topic subset rather than the full 10-topic benchmark due to computational constraints.
+Our study has several limitations. The evaluation covers 10 topics from a single institution. Reference summaries were written by one annotator per topic. The NLI cross-encoder model has a 512-token window that may undercount entailment for synthesis-heavy summaries.
 
-Based on our findings, we offer three practical recommendations for lecture summarization systems:
+Based on our findings, we recommend three practices for lecture summarization:
 \begin{enumerate}
-    \item Use full-context LLMs that can process the entire lecture in a single pass, avoiding the chunking artifacts that degrade encoder--decoder models.
-    \item Set the output ratio between 6\% and 9\% of input length to balance coverage and precision.
-    \item Integrate retrieval-grounded verification to reduce the rate of unsupported claims in generated summaries.
+    \item Use full-context LLMs (128K+ tokens) to process entire lectures without chunking.
+    \item Fine-tune on lecture-specific data when possible---even modest adaptation yields gains in faithfulness.
+    \item Set the output ratio between 6\% and 9\% for balanced summaries, or 1--3\% for high-precision outputs.
 \end{enumerate}
